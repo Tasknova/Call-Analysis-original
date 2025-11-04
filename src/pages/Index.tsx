@@ -58,7 +58,13 @@ const Index = () => {
 
       setUserProfile(data);
 
-      if (!data || !data.onboarding_completed) {
+      // Check if user has a complete profile (either onboarding completed OR has essential profile data)
+      const hasCompleteProfile = data && (
+        data.onboarding_completed || 
+        (data.full_name && data.company_name && data.position)
+      );
+
+      if (!hasCompleteProfile) {
         setCurrentView('onboarding');
       } else {
         setCurrentView('dashboard');

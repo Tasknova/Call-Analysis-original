@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,7 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [formData, setFormData] = useState<FormData>({
     company_name: '',
     company_email: '',
@@ -34,6 +35,58 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     position: '',
     use_cases: [],
   });
+
+  // Check for existing profile data on component mount
+  useEffect(() => {
+    const checkExistingProfile = async () => {
+      if (!user) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching existing profile:', error);
+          setInitialLoading(false);
+          return;
+        }
+
+        if (data) {
+          // Check if user has a complete profile
+          const hasCompleteProfile = data.onboarding_completed || 
+            (data.full_name && data.company_name && data.position);
+
+          if (hasCompleteProfile) {
+            // User already has a complete profile, skip onboarding
+            toast({
+              title: 'Welcome back!',
+              description: 'Your profile is already set up.',
+            });
+            onComplete();
+            return;
+          }
+
+          // Pre-populate form with existing data
+          setFormData({
+            company_name: data.company_name || '',
+            company_email: data.company_email || '',
+            company_industry: data.company_industry || '',
+            position: data.position || '',
+            use_cases: data.use_cases || [],
+          });
+        }
+      } catch (error) {
+        console.error('Error checking existing profile:', error);
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    checkExistingProfile();
+  }, [user, onComplete, toast]);
 
   const industries = [
     'Technology',
@@ -178,6 +231,48 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     }
   };
 
+  const handleSkip = async () => {
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      // Create a minimal profile to mark onboarding as completed
+      const profileData = {
+        user_id: user.id,
+        email: user.email!,
+        full_name: user.user_metadata?.full_name || '',
+        avatar_url: user.user_metadata?.avatar_url,
+        onboarding_completed: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert(profileData);
+
+      if (error) {
+        throw error;
+      }
+
+      toast({
+        title: 'Welcome to Tasknova!',
+        description: 'You can complete your profile later from the settings.',
+      });
+
+      onComplete();
+    } catch (error) {
+      console.error('Error skipping onboarding:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to skip setup. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const canProceed = () => {
     switch (currentStep) {
       case 0:
@@ -207,6 +302,18 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       opacity: 0
     })
   };
+
+  // Show loading spinner while checking for existing profile
+  if (initialLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-6">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading your profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center px-6">
@@ -413,16 +520,27 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
             </div>
 
             {/* Navigation Buttons */}
-            <div className="flex justify-between mt-8 pt-6 border-t">
-              <Button
-                variant="outline"
-                onClick={handleBack}
-                disabled={currentStep === 0}
-                className="flex items-center gap-2"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
+            <div className="flex justify-between items-center mt-8 pt-6 border-t">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={currentStep === 0}
+                  className="flex items-center gap-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  onClick={handleSkip}
+                  disabled={loading}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  Skip for now
+                </Button>
+              </div>
               
               {currentStep < steps.length - 1 ? (
                 <Button
